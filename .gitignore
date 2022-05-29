@@ -1,0 +1,6 @@
+.idea/
+runtime/
+.env
+dist/
+config.toml
+db/geecaptcha.db

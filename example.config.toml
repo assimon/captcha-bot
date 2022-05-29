@@ -1,0 +1,23 @@
+#系统设置
+[system]
+join_hint_after_del_time=60 #加群验证提示消息多久删除，秒
+captcha_timeout=120 #验证超时时间，秒
+runtime_path="/runtime"
+
+#telegram 配置
+[telegram]
+bot_token=""
+api_proxy=""
+manage_users=[]
+
+#日志配置
+[log]
+max_size=32
+max_age=7
+max_backups=3
+
+#消息模板
+[message]
+join_hint="欢迎 @%s 加入 %s ！\n\n⚠本群已开启新成员验证功能，未通过验证的用户无法发言！\n\n⏱本条消息 %d 秒后自动删除\n\n👇点击下方按钮自助解除禁言"
+captcha_image="欢迎您加入[%s]！\n\n⚠本群已开启新成员验证功能。\n\n👆为了证明您不是机器人，请发送以上图片验证码内容\n\n🤖机器人将自动验证您发送的验证码内容是否正确\n\n⏱本条验证消息有效期[%d]秒"
+verification_complete="恭喜您成功通过[🤖人机验证]，系统已为您解除禁言限制。\n\n如若还是无法发言，请重启telegram客户端"
