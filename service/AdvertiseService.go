@@ -17,7 +17,7 @@ func AllAdvertiseService() (advertises []model.Advertise, err error) {
 
 func GetEfficientAdvertiseService() (advertises []model.Advertise, err error) {
 	nowTime := carbon.Now().Timestamp()
-	err = orm.Gdb.Model(&advertises).Where("validity_period > ?", nowTime).Find(&advertises).Error
+	err = orm.Gdb.Model(&advertises).Where("validity_period > ?", nowTime).Order("sort desc").Find(&advertises).Error
 	return
 }
 
