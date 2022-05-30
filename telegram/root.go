@@ -13,8 +13,9 @@ var Bot *tb.Bot
 // BotStart 机器人启动
 func BotStart() {
 	setting := tb.Settings{
-		Token:  config.TelegramC.BotToken,
-		Poller: &tb.LongPoller{Timeout: 10 * time.Second},
+		Token:   config.TelegramC.BotToken,
+		Updates: 100,
+		Poller:  &tb.LongPoller{Timeout: 10 * time.Second},
 		OnError: func(err error, context tb.Context) {
 			ulog.Sugar.Error(err)
 		},

@@ -4,3 +4,4 @@ runtime/
 dist/
 config.toml
 db/geecaptcha.db
+captcha-bot
