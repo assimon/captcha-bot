@@ -17,6 +17,11 @@ func Start() {
 	orm.InitDb()
 	// 机器人启动
 	go func() {
+		defer func() {
+			if err := recover(); err != nil {
+				log.Sugar.Error("server bot err:", err)
+			}
+		}()
 		telegram.BotStart()
 	}()
 	signalChan := make(chan os.Signal, 1)
