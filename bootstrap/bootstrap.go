@@ -5,6 +5,7 @@ import (
 	"github.com/assimon/captcha-bot/util/config"
 	"github.com/assimon/captcha-bot/util/log"
 	"github.com/assimon/captcha-bot/util/orm"
+	"github.com/assimon/captcha-bot/util/sensitiveword"
 	"os"
 	"os/signal"
 	"syscall"
@@ -15,6 +16,7 @@ func Start() {
 	config.InitConfig()
 	log.InitLog()
 	orm.InitDb()
+	sensitiveword.InitSensitiveWord()
 	// 机器人启动
 	go func() {
 		defer func() {

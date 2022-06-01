@@ -7,6 +7,7 @@ import (
 	"github.com/assimon/captcha-bot/util/captcha"
 	"github.com/assimon/captcha-bot/util/config"
 	"github.com/assimon/captcha-bot/util/log"
+	"github.com/assimon/captcha-bot/util/sensitiveword"
 	"github.com/golang-module/carbon/v2"
 	uuid "github.com/satori/go.uuid"
 	tb "gopkg.in/telebot.v3"
@@ -25,6 +26,7 @@ var (
 
 var (
 	captchaMessageMenu = &tb.ReplyMarkup{ResizeKeyboard: true}
+	manslaughterMenu   = &tb.ReplyMarkup{ResizeKeyboard: true}
 )
 
 var (
@@ -101,7 +103,7 @@ func StartCaptcha(c tb.Context) error {
 	userCaptchaCodeKey := strconv.FormatInt(userId, 10)
 	gUserCaptchaCodeTable.Set(userCaptchaCodeKey, userCaptchaCodeVal)
 	time.AfterFunc(time.Duration(config.SystemC.CaptchaTimeout)*time.Second, func() {
-		os.Remove(imgUrl)
+		_ = os.Remove(imgUrl)
 		gMessageTokenMap.Delete(chatToken)
 		gUserCaptchaCodeTable.Del(userCaptchaCodeKey)
 		err = Bot.Delete(botMsg)
@@ -114,10 +116,73 @@ func StartCaptcha(c tb.Context) error {
 
 // OnTextMessage 文本消息
 func OnTextMessage(c tb.Context) error {
-	// 不是私聊
-	if !c.Message().Private() {
+	// 私聊走入群验证操作
+	if c.Message().Private() {
+		return VerificationProcess(c)
+	}
+	// 否则走广告阻止监听
+	return AdBlock(c)
+}
+
+// AdBlock 广告阻止
+func AdBlock(c tb.Context) error {
+	userId := c.Message().Sender.ID
+	userLink := fmt.Sprintf("tg://user?id=%d", c.Message().Sender.ID)
+	userNickname := c.Message().Sender.LastName + c.Message().Sender.FirstName
+	messageText := c.Message().Text
+	// 管理员 放行任何操作
+	if isManage(c.Chat(), userId) {
 		return nil
 	}
+	dict := sensitiveword.Filter.FindAll(messageText)
+	if len(dict) <= 0 || len(dict) < config.AdBlockC.NumberOfForbiddenWords {
+		return nil
+	}
+	// ban user
+	restrictedUntil := config.AdBlockC.BlockTime
+	if restrictedUntil <= 0 {
+		restrictedUntil = tb.Forever()
+	}
+	err := Bot.Restrict(c.Chat(), &tb.ChatMember{
+		Rights:          tb.NoRights(),
+		User:            c.Message().Sender,
+		RestrictedUntil: restrictedUntil,
+	})
+	if err != nil {
+		log.Sugar.Error("[AdBlock] ban user err:", err)
+		return err
+	}
+	blockMessage := fmt.Sprintf(config.MessageC.BlockHint,
+		userNickname,
+		userLink,
+		strings.Join(dict, ","))
+	manslaughterBtn := manslaughterMenu.Data("👮🏻管理员解封", strconv.FormatInt(userId, 10))
+	manslaughterMenu.Inline(manslaughterMenu.Row(manslaughterBtn))
+	Bot.Handle(&manslaughterBtn, func(c tb.Context) error {
+		if err = Bot.Delete(c.Message()); err != nil {
+			log.Sugar.Error("[AdBlock] delete adblock message err:", err)
+			return err
+		}
+		// 解禁用户
+		err = Bot.Restrict(c.Chat(), &tb.ChatMember{
+			User:   &tb.User{ID: userId},
+			Rights: tb.NoRestrictions(),
+		})
+		if err != nil {
+			log.Sugar.Error("[AdBlock] unban user err:", err)
+			return err
+		}
+		return c.Send(fmt.Sprintf("管理员已解除对用户：[%s](%s) 的封禁", userNickname, userLink), tb.ModeMarkdownV2)
+	}, isManageMiddleware)
+	if err = c.Reply(blockMessage, manslaughterMenu, tb.ModeMarkdownV2); err != nil {
+		log.Sugar.Error("[AdBlock] reply message err:", err)
+		return err
+	}
+	return c.Delete()
+}
+
+// VerificationProcess 验证处理
+func VerificationProcess(c tb.Context) error {
 	userIdStr := strconv.FormatInt(c.Sender().ID, 10)
 	captchaCode := gUserCaptchaCodeTable.Get(userIdStr)
 	if captchaCode == nil || captchaCode.UserId != c.Sender().ID {
@@ -140,17 +205,20 @@ func OnTextMessage(c tb.Context) error {
 	gUserCaptchaCodeTable.Del(userIdStr)
 	gUserCaptchaPendingTable.Del(fmt.Sprintf("%d|%d", captchaCode.PendingMessage.ID, captchaCode.PendingMessage.Chat.ID))
 	//删除验证消息
-	Bot.Delete(captchaCode.CaptchaMessage)
-	Bot.Delete(captchaCode.PendingMessage)
+	if err = Bot.Delete(captchaCode.CaptchaMessage); err != nil {
+		log.Sugar.Error("[OnTextMessage] delete captcha message err:", err)
+	}
+	if err = Bot.Delete(captchaCode.PendingMessage); err != nil {
+		log.Sugar.Error("[OnTextMessage] delete pending message err:", err)
+	}
 	return c.Send(config.MessageC.VerificationComplete)
-
 }
 
 // UserJoinGroup 用户加群事件
 func UserJoinGroup(c tb.Context) error {
 	var err error
-	err = c.Delete()
-	if err != nil {
+
+	if err = c.Delete(); err != nil {
 		log.Sugar.Error("[UserJoinGroup] delete join message err:", err)
 	}
 	// 如果是管理员邀请的，直接通过
@@ -166,10 +234,14 @@ func UserJoinGroup(c tb.Context) error {
 	if err != nil {
 		log.Sugar.Error("[UserJoinGroup] ban user err:", err)
 	}
-	joinMessage := fmt.Sprintf(config.MessageC.JoinHint, c.Message().UserJoined.Username, c.Chat().Title, config.SystemC.JoinHintAfterDelTime)
+	userLink := fmt.Sprintf("tg://user?id=%d", c.Message().UserJoined.ID)
+	joinMessage := fmt.Sprintf(config.MessageC.JoinHint,
+		c.Message().UserJoined.LastName+c.Message().UserJoined.FirstName,
+		userLink,
+		c.Chat().Title,
+		config.SystemC.JoinHintAfterDelTime)
 	chatToken := uuid.NewV4().String()
 	doCaptchaBtn := joinMessageMenu.URL("👉🏻点我开始人机验证🤖", fmt.Sprintf("https://t.me/%s?start=%s", Bot.Me.Username, chatToken))
-
 	joinMessageMenu.Inline(
 		joinMessageMenu.Row(doCaptchaBtn),
 		joinMessageMenu.Row(manageBanBtn, managePassBtn),
@@ -191,7 +263,7 @@ func UserJoinGroup(c tb.Context) error {
 	if err != nil {
 		log.Sugar.Error("[UserJoinGroup] add captcha record err:", err)
 	}
-	captchaMessage, err := Bot.Send(c.Chat(), joinMessage, joinMessageMenu)
+	captchaMessage, err := Bot.Send(c.Chat(), joinMessage, joinMessageMenu, tb.ModeMarkdownV2)
 	if err != nil {
 		log.Sugar.Error("[UserJoinGroup] send join hint message err:", err)
 	}
@@ -206,8 +278,7 @@ func UserJoinGroup(c tb.Context) error {
 	captchaDataKey := fmt.Sprintf("%d|%d", captchaMessage.ID, c.Chat().ID)
 	gUserCaptchaPendingTable.Set(captchaDataKey, captchaDataVal)
 	time.AfterFunc(time.Duration(config.SystemC.JoinHintAfterDelTime)*time.Second, func() {
-		err = Bot.Delete(captchaMessage)
-		if err != nil {
+		if err = Bot.Delete(captchaMessage); err != nil {
 			log.Sugar.Error("[UserJoinGroup] delete join hint message err:", err)
 		}
 	})
@@ -279,7 +350,7 @@ func refreshCaptcha() func(c tb.Context) error {
 		}
 		captchaCode.Code = code
 		gUserCaptchaCodeTable.Set(userIdStr, captchaCode)
-		os.Remove(imgUrl)
+		_ = os.Remove(imgUrl)
 		return c.Respond(&tb.CallbackResponse{
 			Text: "验证码已刷新~",
 		})
@@ -307,7 +378,9 @@ func AddAd(c tb.Context) error {
 	if err != nil {
 		return c.Send("新增广告失败:" + err.Error())
 	}
-	c.Send("新增广告成功")
+	if err = c.Send("新增广告成功"); err != nil {
+		log.Sugar.Error("[AddAd] send success message err:", err)
+	}
 	return AllAd(c)
 }
 
@@ -339,10 +412,11 @@ func DelAd(c tb.Context) error {
 	if err != nil {
 		return c.Send(err.Error())
 	}
-	err = service.DeleteAdvertiseService(id)
-	if err != nil {
+	if err = service.DeleteAdvertiseService(id); err != nil {
 		return c.Send(err.Error())
 	}
-	c.Send("广告删除成功！")
+	if err = c.Send("广告删除成功！"); err != nil {
+		log.Sugar.Error("[DelAd] send success message err:", err)
+	}
 	return AllAd(c)
 }

@@ -41,11 +41,12 @@ func RegisterHandle() {
 	Bot.Handle(START_CMD, StartCaptcha)
 	Bot.Handle(tb.OnUserJoined, UserJoinGroup)
 	Bot.Handle(tb.OnText, OnTextMessage)
-	Bot.Handle(&manageBanBtn, ManageBan(), isManageMiddleware)
-	Bot.Handle(&managePassBtn, ManagePass(), isManageMiddleware)
 	Bot.Handle(tb.OnUserLeft, func(c tb.Context) error {
 		return c.Delete()
 	})
+	// 按钮点击事件
+	Bot.Handle(&manageBanBtn, ManageBan(), isManageMiddleware)
+	Bot.Handle(&managePassBtn, ManagePass(), isManageMiddleware)
 	// 广告
 	Bot.Handle(ADD_AD, AddAd, isRootMiddleware)
 	Bot.Handle(ALL_AD, AllAd, isRootMiddleware)

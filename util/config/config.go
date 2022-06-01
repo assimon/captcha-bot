@@ -36,9 +36,17 @@ type Message struct {
 	JoinHint             string `mapstructure:"join_hint"`
 	CaptchaImage         string `mapstructure:"captcha_image"`
 	VerificationComplete string `mapstructure:"verification_complete"`
+	BlockHint            string `mapstructure:"block_hint"`
 }
 
 var MessageC Message
+
+type AdBlock struct {
+	NumberOfForbiddenWords int   `mapstructure:"number_of_forbidden_words"`
+	BlockTime              int64 `mapstructure:"block_time"`
+}
+
+var AdBlockC AdBlock
 
 // InitConfig 配置加载
 func InitConfig() {
@@ -67,5 +75,9 @@ func InitConfig() {
 	err = viper.UnmarshalKey("message", &MessageC)
 	if err != nil {
 		log.Fatal("load config log err:", err)
+	}
+	err = viper.UnmarshalKey("adblock", &AdBlockC)
+	if err != nil {
+		log.Fatal("load adblock log err:", err)
 	}
 }
