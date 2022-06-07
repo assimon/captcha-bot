@@ -158,6 +158,7 @@ func AdBlock(c tb.Context) error {
 		strings.Join(dict, ","))
 	manslaughterBtn := manslaughterMenu.Data("👮🏻管理员解封", strconv.FormatInt(userId, 10))
 	manslaughterMenu.Inline(manslaughterMenu.Row(manslaughterBtn))
+	LoadAdMenuBtn(manslaughterMenu)
 	Bot.Handle(&manslaughterBtn, func(c tb.Context) error {
 		if err = Bot.Delete(c.Message()); err != nil {
 			log.Sugar.Error("[AdBlock] delete adblock message err:", err)
@@ -217,7 +218,6 @@ func VerificationProcess(c tb.Context) error {
 // UserJoinGroup 用户加群事件
 func UserJoinGroup(c tb.Context) error {
 	var err error
-
 	if err = c.Delete(); err != nil {
 		log.Sugar.Error("[UserJoinGroup] delete join message err:", err)
 	}
@@ -246,20 +246,7 @@ func UserJoinGroup(c tb.Context) error {
 		joinMessageMenu.Row(doCaptchaBtn),
 		joinMessageMenu.Row(manageBanBtn, managePassBtn),
 	)
-	// 加载广告
-	advertises, err := service.GetEfficientAdvertiseService()
-	if err != nil {
-		log.Sugar.Error("[UserJoinGroup] load advertise err:", err)
-	} else {
-		for _, advertise := range advertises {
-			joinMessageMenu.InlineKeyboard = append(joinMessageMenu.InlineKeyboard, []tb.InlineButton{
-				{
-					Text: advertise.Title,
-					URL:  advertise.Url,
-				},
-			})
-		}
-	}
+	LoadAdMenuBtn(joinMessageMenu)
 	if err != nil {
 		log.Sugar.Error("[UserJoinGroup] add captcha record err:", err)
 	}
@@ -419,4 +406,21 @@ func DelAd(c tb.Context) error {
 		log.Sugar.Error("[DelAd] send success message err:", err)
 	}
 	return AllAd(c)
+}
+
+// LoadAdMenuBtn 加载广告
+func LoadAdMenuBtn(menu *tb.ReplyMarkup) {
+	advertises, err := service.GetEfficientAdvertiseService()
+	if err != nil {
+		log.Sugar.Error("[UserJoinGroup] load advertise err:", err)
+	} else {
+		for _, advertise := range advertises {
+			menu.InlineKeyboard = append(menu.InlineKeyboard, []tb.InlineButton{
+				{
+					Text: advertise.Title,
+					URL:  advertise.Url,
+				},
+			})
+		}
+	}
 }
