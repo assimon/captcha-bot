@@ -225,6 +225,14 @@ func UserJoinGroup(c tb.Context) error {
 	if isManage(c.Chat(), c.Sender().ID) {
 		return nil
 	}
+	// 如果是应该被限制的情况下，就不要再发送验证消息了，以免被限制的人利用，重新加群通过验证后解除限制
+	userRights, err := Bot.ChatMemberOf(c.Chat(), c.Message().UserJoined)
+	if err != nil {
+		return err
+	}
+	if userRights.Role == tb.Restricted {
+		return nil
+	}
 	// ban user
 	err = Bot.Restrict(c.Chat(), &tb.ChatMember{
 		Rights:          tb.NoRights(),
@@ -233,6 +241,7 @@ func UserJoinGroup(c tb.Context) error {
 	})
 	if err != nil {
 		log.Sugar.Error("[UserJoinGroup] ban user err:", err)
+		return err
 	}
 	userLink := fmt.Sprintf("tg://user?id=%d", c.Message().UserJoined.ID)
 	joinMessage := fmt.Sprintf(config.MessageC.JoinHint,
@@ -247,12 +256,10 @@ func UserJoinGroup(c tb.Context) error {
 		joinMessageMenu.Row(manageBanBtn, managePassBtn),
 	)
 	LoadAdMenuBtn(joinMessageMenu)
-	if err != nil {
-		log.Sugar.Error("[UserJoinGroup] add captcha record err:", err)
-	}
 	captchaMessage, err := Bot.Send(c.Chat(), joinMessage, joinMessageMenu, tb.ModeMarkdownV2)
 	if err != nil {
 		log.Sugar.Error("[UserJoinGroup] send join hint message err:", err)
+		return err
 	}
 	// 设置token对于验证消息
 	gMessageTokenMap.Store(chatToken, fmt.Sprintf("%d|%d|%s", captchaMessage.ID, c.Chat().ID, c.Chat().Title))
