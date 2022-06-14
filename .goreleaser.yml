@@ -12,10 +12,7 @@ builds:
       - CGO_ENABLED=0
     goos:
       - darwin
-      - freebsd
       - linux
-      - netbsd
-      - openbsd
       - windows
     goarch:
       - 386
@@ -31,7 +28,8 @@ archives:
       amd64: x86_64
     files:
       - LICENSE
-      - .env.example
+      - example.config.toml
+      - dict/enc_*
       - README.md
 checksum:
   name_template: 'checksums.txt'
