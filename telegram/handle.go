@@ -35,7 +35,8 @@ var (
 )
 
 var (
-	gMessageTokenMap sync.Map
+	gMessageTokenMap                 sync.Map
+	gUserIdToJoinCaptchaMessageIdMap sync.Map
 )
 
 // StartCaptcha 开始验证
@@ -177,9 +178,15 @@ func AdBlock(c tb.Context) error {
 	}, isManageMiddleware)
 	//删除验证消息
 	go func() {
-		userIdStr := strconv.FormatInt(userId, 10)
-		captchaCode := gUserCaptchaCodeTable.Get(userIdStr)
-		if err = Bot.Delete(captchaCode.CaptchaMessage); err != nil {
+		msgObj, ok := gUserIdToJoinCaptchaMessageIdMap.Load(userId)
+		if !ok {
+			return
+		}
+		delPendingMsg, ok := msgObj.(*tb.Message)
+		if !ok {
+			return
+		}
+		if err = Bot.Delete(delPendingMsg); err != nil {
 			log.Sugar.Error("[AdBlock] delete captcha message err:", err)
 		}
 	}()
@@ -271,6 +278,7 @@ func UserJoinGroup(c tb.Context) error {
 	}
 	// 设置token对于验证消息
 	gMessageTokenMap.Store(chatToken, fmt.Sprintf("%d|%d|%s", captchaMessage.ID, c.Chat().ID, c.Chat().Title))
+	gUserIdToJoinCaptchaMessageIdMap.Store(c.Sender().ID, captchaMessage)
 	captchaDataVal := &service.CaptchaPending{
 		PendingMessage: captchaMessage,
 		UserId:         c.Message().UserJoined.ID,
