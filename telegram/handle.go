@@ -175,6 +175,14 @@ func AdBlock(c tb.Context) error {
 		}
 		return c.Send(fmt.Sprintf("管理员已解除对用户：[%s](%s) 的封禁", userNickname, userLink), tb.ModeMarkdownV2)
 	}, isManageMiddleware)
+	//删除验证消息
+	go func() {
+		userIdStr := strconv.FormatInt(userId, 10)
+		captchaCode := gUserCaptchaCodeTable.Get(userIdStr)
+		if err = Bot.Delete(captchaCode.CaptchaMessage); err != nil {
+			log.Sugar.Error("[AdBlock] delete captcha message err:", err)
+		}
+	}()
 	if err = c.Reply(blockMessage, manslaughterMenu, tb.ModeMarkdownV2); err != nil {
 		log.Sugar.Error("[AdBlock] reply message err:", err)
 		return err
