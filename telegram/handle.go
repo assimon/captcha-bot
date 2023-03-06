@@ -237,6 +237,9 @@ func UserJoinGroup(c tb.Context) error {
 	if isManage(c.ChatMember().Chat, c.ChatMember().Sender.ID) {
 		return nil
 	}
+	if c.ChatMember().NewChatMember.Role != tb.Member {
+		return nil
+	}
 	// ban user
 	err = Bot.Restrict(c.ChatMember().Chat, &tb.ChatMember{
 		Rights:          tb.NoRights(),
