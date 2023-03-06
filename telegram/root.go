@@ -39,11 +39,8 @@ func RegisterHandle() {
 		return c.Send("pong")
 	})
 	Bot.Handle(START_CMD, StartCaptcha)
-	Bot.Handle(tb.OnUserJoined, UserJoinGroup)
+	Bot.Handle(tb.OnChatMember, UserJoinGroup)
 	Bot.Handle(tb.OnText, OnTextMessage)
-	Bot.Handle(tb.OnUserLeft, func(c tb.Context) error {
-		return c.Delete()
-	})
 	// 按钮点击事件
 	Bot.Handle(&manageBanBtn, ManageBan(), isManageMiddleware)
 	Bot.Handle(&managePassBtn, ManagePass(), isManageMiddleware)

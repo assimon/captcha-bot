@@ -233,36 +233,25 @@ func VerificationProcess(c tb.Context) error {
 // UserJoinGroup 用户加群事件
 func UserJoinGroup(c tb.Context) error {
 	var err error
-	if err = c.Delete(); err != nil {
-		log.Sugar.Error("[UserJoinGroup] delete join message err:", err)
-	}
 	// 如果是管理员邀请的，直接通过
-	if isManage(c.Chat(), c.Sender().ID) {
-		return nil
-	}
-	// 如果是应该被限制的情况下，就不要再发送验证消息了，以免被限制的人利用，重新加群通过验证后解除限制
-	userRights, err := Bot.ChatMemberOf(c.Chat(), c.Message().UserJoined)
-	if err != nil {
-		return err
-	}
-	if userRights.Role == tb.Restricted {
+	if isManage(c.ChatMember().Chat, c.ChatMember().Sender.ID) {
 		return nil
 	}
 	// ban user
-	err = Bot.Restrict(c.Chat(), &tb.ChatMember{
+	err = Bot.Restrict(c.ChatMember().Chat, &tb.ChatMember{
 		Rights:          tb.NoRights(),
-		User:            c.Message().UserJoined,
+		User:            c.ChatMember().Sender,
 		RestrictedUntil: tb.Forever(),
 	})
 	if err != nil {
 		log.Sugar.Error("[UserJoinGroup] ban user err:", err)
 		return err
 	}
-	userLink := fmt.Sprintf("tg://user?id=%d", c.Message().UserJoined.ID)
+	userLink := fmt.Sprintf("tg://user?id=%d", c.ChatMember().Sender.ID)
 	joinMessage := fmt.Sprintf(config.MessageC.JoinHint,
-		c.Message().UserJoined.LastName+c.Message().UserJoined.FirstName,
+		c.ChatMember().Sender.LastName+c.ChatMember().Sender.FirstName,
 		userLink,
-		c.Chat().Title,
+		c.ChatMember().Chat.Title,
 		config.SystemC.JoinHintAfterDelTime)
 	chatToken := uuid.NewV4().String()
 	doCaptchaBtn := joinMessageMenu.URL("👉🏻点我开始人机验证🤖", fmt.Sprintf("https://t.me/%s?start=%s", Bot.Me.Username, chatToken))
@@ -271,21 +260,21 @@ func UserJoinGroup(c tb.Context) error {
 		joinMessageMenu.Row(manageBanBtn, managePassBtn),
 	)
 	LoadAdMenuBtn(joinMessageMenu)
-	captchaMessage, err := Bot.Send(c.Chat(), joinMessage, joinMessageMenu, tb.ModeMarkdownV2)
+	captchaMessage, err := Bot.Send(c.ChatMember().Chat, joinMessage, joinMessageMenu, tb.ModeMarkdownV2)
 	if err != nil {
 		log.Sugar.Error("[UserJoinGroup] send join hint message err:", err)
 		return err
 	}
 	// 设置token对于验证消息
-	gMessageTokenMap.Store(chatToken, fmt.Sprintf("%d|%d|%s", captchaMessage.ID, c.Chat().ID, c.Chat().Title))
-	gUserIdToJoinCaptchaMessageIdMap.Store(c.Sender().ID, captchaMessage)
+	gMessageTokenMap.Store(chatToken, fmt.Sprintf("%d|%d|%s", captchaMessage.ID, c.ChatMember().Chat.ID, c.ChatMember().Chat.Title))
+	gUserIdToJoinCaptchaMessageIdMap.Store(c.ChatMember().Sender.ID, captchaMessage)
 	captchaDataVal := &service.CaptchaPending{
 		PendingMessage: captchaMessage,
-		UserId:         c.Message().UserJoined.ID,
-		GroupId:        c.Chat().ID,
+		UserId:         c.ChatMember().Sender.ID,
+		GroupId:        c.ChatMember().Chat.ID,
 		JoinAt:         carbon.Now().Timestamp(),
 	}
-	captchaDataKey := fmt.Sprintf("%d|%d", captchaMessage.ID, c.Chat().ID)
+	captchaDataKey := fmt.Sprintf("%d|%d", captchaMessage.ID, c.ChatMember().Chat.ID)
 	gUserCaptchaPendingTable.Set(captchaDataKey, captchaDataVal)
 	time.AfterFunc(time.Duration(config.SystemC.JoinHintAfterDelTime)*time.Second, func() {
 		if err = Bot.Delete(captchaMessage); err != nil {
