@@ -1,5 +1,6 @@
 #系统设置
 [system]
+app_debbug=false
 join_hint_after_del_time=60 # 加群验证提示消息多久删除，秒
 captcha_timeout=120 # 验证超时时间，秒
 runtime_path="/runtime" # 缓存目录
