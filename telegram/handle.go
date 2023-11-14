@@ -262,6 +262,7 @@ func UserJoinGroup(c tb.Context) error {
 		TelegramChatId:        c.Message().Chat.ID,
 		CaptchaMessageId:      captchaMessage.ID,
 		CaptchaStatus:         model.CaptchaStatusPending,
+		CaptchaTimeoutEndTime: carbon.DateTime{Carbon: carbon.Now().AddSeconds(config.SystemC.CaptchaTimeout)},
 	}
 	err = service.CreateCaptchaRecord(record)
 	return err

@@ -13,7 +13,7 @@ import (
 
 func RunSyncTask() {
 	c := cron.New()
-	c.AddFunc("*/10 * * * * *", func() {
+	c.AddFunc("*/5 * * * * *", func() {
 		go func() {
 			E.MustPanicErrorFunc(TimeoutLeaveGroupToUser)
 		}()
