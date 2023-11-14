@@ -74,10 +74,10 @@ func InitConfig() {
 	}
 	err = viper.UnmarshalKey("message", &MessageC)
 	if err != nil {
-		log.Fatal("load config log err:", err)
+		log.Fatal("load config message err:", err)
 	}
 	err = viper.UnmarshalKey("adblock", &AdBlockC)
 	if err != nil {
-		log.Fatal("load adblock log err:", err)
+		log.Fatal("load config adblock err:", err)
 	}
 }

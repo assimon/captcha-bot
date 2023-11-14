@@ -13,9 +13,12 @@ var Gdb *gorm.DB
 func InitDb() {
 	db, err := gorm.Open(sqlite.Open(config.AppPath+"/db/geecaptcha.db"), &gorm.Config{})
 	if err != nil {
-		log.Fatal("open datebase err:", err)
+		log.Fatal("open database err:", err)
 	}
-	db.AutoMigrate(model.Advertise{})
+	err = db.AutoMigrate(model.Advertise{}, model.UserCaptchaRecord{})
+	if err != nil {
+		log.Fatal("database AutoMigrate err:", err)
+	}
 	database, _ := db.DB()
 	database.SetMaxOpenConns(1)
 	err = database.Ping()

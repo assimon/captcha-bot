@@ -24,13 +24,14 @@ func BotStart() {
 	if config.TelegramC.ApiProxy != "" {
 		setting.URL = config.TelegramC.ApiProxy
 	}
-	b, err := tb.NewBot(setting)
+	var err error
+	Bot, err = tb.NewBot(setting)
 	if err != nil {
 		log.Fatal(err)
 	}
-	Bot = b
 	RegisterHandle()
-	b.Start()
+	go RunSyncTask()
+	Bot.Start()
 }
 
 // RegisterHandle 注册处理器
@@ -39,11 +40,8 @@ func RegisterHandle() {
 		return c.Send("pong")
 	})
 	Bot.Handle(START_CMD, StartCaptcha)
-	Bot.Handle(tb.OnChatMember, UserJoinGroup)
+	Bot.Handle(tb.OnUserJoined, UserJoinGroup)
 	Bot.Handle(tb.OnText, OnTextMessage)
-	// 按钮点击事件
-	Bot.Handle(&manageBanBtn, ManageBan(), isManageMiddleware)
-	Bot.Handle(&managePassBtn, ManagePass(), isManageMiddleware)
 	// 广告
 	Bot.Handle(ADD_AD, AddAd, isRootMiddleware)
 	Bot.Handle(ALL_AD, AllAd, isRootMiddleware)

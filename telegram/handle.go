@@ -20,8 +20,6 @@ import (
 
 var (
 	joinMessageMenu = &tb.ReplyMarkup{ResizeKeyboard: true}
-	manageBanBtn    = joinMessageMenu.Data("👮‍管理员禁止🈲", "manageBanBtn")
-	managePassBtn   = joinMessageMenu.Data("👮‍管理员通过✅", "managePassBtn")
 )
 
 var (
@@ -30,44 +28,28 @@ var (
 )
 
 var (
-	gUserCaptchaCodeTable    = service.NewCaptchaCodeTable()
-	gUserCaptchaPendingTable = service.NewCaptchaPendingTable()
-)
-
-var (
-	gMessageTokenMap                 sync.Map
-	gUserIdToJoinCaptchaMessageIdMap sync.Map
+	TgUserIdMapToCaptchaSession sync.Map
 )
 
 // StartCaptcha 开始验证
 func StartCaptcha(c tb.Context) error {
-	chatToken := c.Message().Payload
+	captchaId := c.Message().Payload
 	// 不是私聊或者载荷为空
-	if !c.Message().Private() || chatToken == "" {
+	if !c.Message().Private() || captchaId == "" {
 		return nil
 	}
-	payload, ok := gMessageTokenMap.Load(chatToken)
-	if !ok {
-		return nil
-	}
-	// payload不能正常解析
-	payloadSlice := strings.Split(payload.(string), "|")
-	if len(payloadSlice) != 3 {
-		return nil
-	}
-	pendingMessageId, err := strconv.Atoi(payloadSlice[0])
-	groupId, err := strconv.ParseInt(payloadSlice[1], 10, 64)
-	groupTitle := payloadSlice[2]
+	captchaRecord, err := service.GetRecordByCaptchaId(captchaId)
 	if err != nil {
-		log.Sugar.Error("[StartCaptcha] groupId err:", err)
-		return nil
+		log.Sugar.Error("[StartCaptcha] GetRecordByCaptchaId err:", err)
+		return c.Send("服务器异常~，请稍后再试")
 	}
-	userId := c.Sender().ID
-	pendingKey := fmt.Sprintf("%d|%d", pendingMessageId, groupId)
-	record := gUserCaptchaPendingTable.Get(pendingKey)
-	if record == nil || record.UserId != c.Sender().ID {
-		return c.Send("您在该群没有待验证记录😁")
+	if captchaRecord.ID <= 0 || captchaRecord.TelegramUserId != c.Sender().ID || captchaRecord.CaptchaStatus != model.CaptchaStatusPending {
+		return c.Send("您在该群没有待验证记录，或已超时，请重新加入后验证")
 	}
+
+	// 临时会话对应的验证消息，用于后面用户输入验证码后知道是哪条消息
+	TgUserIdMapToCaptchaSession.Store(c.Sender().ID, captchaId)
+
 	// 获得一个验证码
 	captchaCode, imgUrl, err := captcha.GetCaptcha()
 	if err != nil {
@@ -75,14 +57,14 @@ func StartCaptcha(c tb.Context) error {
 		return c.Send("服务器异常~，请稍后再试")
 	}
 	captchaMessage := fmt.Sprintf(config.MessageC.CaptchaImage,
-		groupTitle,
+		captchaRecord.TelegramChatName,
 		config.SystemC.CaptchaTimeout,
 	)
 	sendMessage := &tb.Photo{
 		File:    tb.FromDisk(imgUrl),
 		Caption: captchaMessage,
 	}
-	refreshCaptchaImageBtn := captchaMessageMenu.Data("🔁刷新验证码", "refreshCaptchaImageBtn", strconv.FormatInt(userId, 10))
+	refreshCaptchaImageBtn := captchaMessageMenu.Data("🔁刷新验证码", "refreshCaptchaImageBtn", captchaId)
 	Bot.Handle(&refreshCaptchaImageBtn, refreshCaptcha())
 	captchaMessageMenu.Inline(
 		captchaMessageMenu.Row(refreshCaptchaImageBtn),
@@ -92,27 +74,18 @@ func StartCaptcha(c tb.Context) error {
 		log.Sugar.Error("[StartCaptcha] send image captcha err:", err)
 		return c.Send("服务器异常~，请稍后再试")
 	}
-	userCaptchaCodeVal := &service.CaptchaCode{
-		UserId:         userId,
-		GroupId:        groupId,
-		Code:           captchaCode,
-		CaptchaMessage: botMsg,
-		PendingMessage: record.PendingMessage,
-		GroupTitle:     groupTitle,
-		CreatedAt:      carbon.Now().Timestamp(),
+	err = service.SetCaptchaCodeMessageIdByCaptchaId(captchaId, botMsg.ID)
+	if err != nil {
+		log.Sugar.Error("[StartCaptcha] SetCaptchaCodeMessageIdByCaptchaId err:", err)
 	}
-	userCaptchaCodeKey := strconv.FormatInt(userId, 10)
-	gUserCaptchaCodeTable.Set(userCaptchaCodeKey, userCaptchaCodeVal)
+	_ = os.Remove(imgUrl)
 	time.AfterFunc(time.Duration(config.SystemC.CaptchaTimeout)*time.Second, func() {
-		_ = os.Remove(imgUrl)
-		gMessageTokenMap.Delete(chatToken)
-		gUserCaptchaCodeTable.Del(userCaptchaCodeKey)
 		err = Bot.Delete(botMsg)
 		if err != nil {
 			log.Sugar.Error("[StartCaptcha] delete captcha err:", err)
 		}
 	})
-	return nil
+	return service.SetCaptchaCodeByCaptchaId(captchaId, captchaCode)
 }
 
 // OnTextMessage 文本消息
@@ -176,20 +149,6 @@ func AdBlock(c tb.Context) error {
 		}
 		return c.Send(fmt.Sprintf("管理员已解除对用户：[%s](%s) 的封禁", userNickname, userLink), tb.ModeMarkdownV2)
 	}, isManageMiddleware)
-	//删除验证消息
-	go func() {
-		msgObj, ok := gUserIdToJoinCaptchaMessageIdMap.Load(userId)
-		if !ok {
-			return
-		}
-		delPendingMsg, ok := msgObj.(*tb.Message)
-		if !ok {
-			return
-		}
-		if err = Bot.Delete(delPendingMsg); err != nil {
-			log.Sugar.Error("[AdBlock] delete captcha message err:", err)
-		}
-	}()
 	if err = c.Reply(blockMessage, manslaughterMenu, tb.ModeMarkdownV2); err != nil {
 		log.Sugar.Error("[AdBlock] reply message err:", err)
 		return err
@@ -199,34 +158,46 @@ func AdBlock(c tb.Context) error {
 
 // VerificationProcess 验证处理
 func VerificationProcess(c tb.Context) error {
-	userIdStr := strconv.FormatInt(c.Sender().ID, 10)
-	captchaCode := gUserCaptchaCodeTable.Get(userIdStr)
-	if captchaCode == nil || captchaCode.UserId != c.Sender().ID {
+	captchaIdObj, ok := TgUserIdMapToCaptchaSession.Load(c.Sender().ID)
+	if !ok {
 		return nil
+	}
+	captchaId, ok := captchaIdObj.(string)
+	if !ok {
+		log.Sugar.Error("Value is not a string")
+		return c.Send("服务器异常~，请稍后再试")
+	}
+	captchaRecord, err := service.GetRecordByCaptchaId(captchaId)
+	if err != nil {
+		log.Sugar.Error("[VerificationProcess] GetRecordByCaptchaId err:", err)
+		return c.Send("服务器异常~，请稍后再试")
+	}
+	if captchaRecord.ID <= 0 || captchaRecord.TelegramUserId != c.Sender().ID || captchaRecord.CaptchaStatus != model.CaptchaStatusPending {
+		return c.Send("您在该群没有待验证记录，或已超时，请重新加入后验证")
 	}
 	// 验证
 	replyCode := c.Message().Text
-	if !captcha.VerifyCaptcha(captchaCode.Code, replyCode) {
-		return nil
+	if !captcha.VerifyCaptcha(captchaRecord.CaptchaCode, replyCode) {
+		return c.Send("验证码错误，请重新输入！")
 	}
 	// 解禁用户
-	err := Bot.Restrict(&tb.Chat{ID: captchaCode.GroupId}, &tb.ChatMember{
-		User:   &tb.User{ID: captchaCode.UserId},
+	err = Bot.Restrict(&tb.Chat{ID: captchaRecord.TelegramChatId}, &tb.ChatMember{
+		User:   &tb.User{ID: captchaRecord.TelegramUserId},
 		Rights: tb.NoRestrictions(),
 	})
 	if err != nil {
 		log.Sugar.Error("[OnTextMessage] unban err:", err)
 		return c.Send("服务器异常~，请稍后重试~")
 	}
-	gUserCaptchaCodeTable.Del(userIdStr)
-	gUserCaptchaPendingTable.Del(fmt.Sprintf("%d|%d", captchaCode.PendingMessage.ID, captchaCode.PendingMessage.Chat.ID))
-	//删除验证消息
-	if err = Bot.Delete(captchaCode.CaptchaMessage); err != nil {
-		log.Sugar.Error("[OnTextMessage] delete captcha message err:", err)
+	err = service.SuccessRecordByCaptchaId(captchaId)
+	if err != nil {
+		log.Sugar.Error("[OnTextMessage] SuccessRecordByCaptchaId err:", err)
 	}
-	if err = Bot.Delete(captchaCode.PendingMessage); err != nil {
-		log.Sugar.Error("[OnTextMessage] delete pending message err:", err)
-	}
+
+	// 删除群内的验证消息
+	Bot.Delete(&tb.StoredMessage{MessageID: strconv.Itoa(captchaRecord.CaptchaMessageId), ChatID: captchaRecord.TelegramChatId})
+	// 删除验证码消息
+	Bot.Delete(&tb.StoredMessage{MessageID: strconv.Itoa(captchaRecord.CaptchaCodeMessageId), ChatID: c.Message().Chat.ID})
 	return c.Send(config.MessageC.VerificationComplete)
 }
 
@@ -234,101 +205,105 @@ func VerificationProcess(c tb.Context) error {
 func UserJoinGroup(c tb.Context) error {
 	var err error
 	// 如果是管理员邀请的，直接通过
-	if isManage(c.ChatMember().Chat, c.ChatMember().Sender.ID) {
+	if isManage(c.Message().Chat, c.Sender().ID) {
 		return nil
 	}
-	if c.ChatMember().NewChatMember.Role != tb.Member {
-		return nil
-	}
+
 	// ban user
-	err = Bot.Restrict(c.ChatMember().Chat, &tb.ChatMember{
+	err = Bot.Restrict(c.Message().Chat, &tb.ChatMember{
 		Rights:          tb.NoRights(),
-		User:            c.ChatMember().Sender,
+		User:            c.Message().UserJoined,
 		RestrictedUntil: tb.Forever(),
 	})
 	if err != nil {
 		log.Sugar.Error("[UserJoinGroup] ban user err:", err)
 		return err
 	}
-	userLink := fmt.Sprintf("tg://user?id=%d", c.ChatMember().Sender.ID)
+
+	userLink := fmt.Sprintf("tg://user?id=%d", c.Message().UserJoined.ID)
 	joinMessage := fmt.Sprintf(config.MessageC.JoinHint,
-		c.ChatMember().Sender.LastName+c.ChatMember().Sender.FirstName,
+		c.Message().UserJoined.LastName+c.Message().UserJoined.FirstName,
 		userLink,
-		c.ChatMember().Chat.Title,
+		c.Message().Chat.Title,
 		config.SystemC.JoinHintAfterDelTime)
-	chatToken := uuid.NewV4().String()
-	doCaptchaBtn := joinMessageMenu.URL("👉🏻点我开始人机验证🤖", fmt.Sprintf("https://t.me/%s?start=%s", Bot.Me.Username, chatToken))
+	captchaId := uuid.NewV4().String()
+	doCaptchaBtn := joinMessageMenu.URL("👉🏻点我开始人机验证🤖", fmt.Sprintf("https://t.me/%s?start=%s", Bot.Me.Username, captchaId))
+	var (
+		manageBanBtn  = joinMessageMenu.Data("👮‍管理员禁止🈲", "manageBanBtn", captchaId)
+		managePassBtn = joinMessageMenu.Data("👮‍管理员通过✅", "managePassBtn", captchaId)
+	)
+	// 按钮点击事件
+	Bot.Handle(&manageBanBtn, ManageBan(), isManageMiddleware)
+	Bot.Handle(&managePassBtn, ManagePass(), isManageMiddleware)
 	joinMessageMenu.Inline(
 		joinMessageMenu.Row(doCaptchaBtn),
 		joinMessageMenu.Row(manageBanBtn, managePassBtn),
 	)
 	LoadAdMenuBtn(joinMessageMenu)
-	captchaMessage, err := Bot.Send(c.ChatMember().Chat, joinMessage, joinMessageMenu, tb.ModeMarkdownV2)
+	captchaMessage, err := Bot.Send(c.Message().Chat, joinMessage, joinMessageMenu, tb.ModeMarkdownV2)
 	if err != nil {
 		log.Sugar.Error("[UserJoinGroup] send join hint message err:", err)
 		return err
 	}
-	// 设置token对于验证消息
-	gMessageTokenMap.Store(chatToken, fmt.Sprintf("%d|%d|%s", captchaMessage.ID, c.ChatMember().Chat.ID, c.ChatMember().Chat.Title))
-	gUserIdToJoinCaptchaMessageIdMap.Store(c.ChatMember().Sender.ID, captchaMessage)
-	captchaDataVal := &service.CaptchaPending{
-		PendingMessage: captchaMessage,
-		UserId:         c.ChatMember().Sender.ID,
-		GroupId:        c.ChatMember().Chat.ID,
-		JoinAt:         carbon.Now().Timestamp(),
+	defer func() {
+		time.AfterFunc(time.Duration(config.SystemC.JoinHintAfterDelTime)*time.Second, func() {
+			if err = Bot.Delete(captchaMessage); err != nil {
+				log.Sugar.Warn("[UserJoinGroup] delete join hint message err:", err)
+			}
+		})
+	}()
+
+	record := &model.UserCaptchaRecord{
+		CaptchaId:             captchaId,
+		TelegramChatName:      c.Message().Chat.Title,
+		TelegramUserLastName:  c.Message().UserJoined.LastName,
+		TelegramUserFirstName: c.Message().UserJoined.FirstName,
+		TelegramUserId:        c.Message().UserJoined.ID,
+		TelegramChatId:        c.Message().Chat.ID,
+		CaptchaMessageId:      captchaMessage.ID,
+		CaptchaStatus:         model.CaptchaStatusPending,
 	}
-	captchaDataKey := fmt.Sprintf("%d|%d", captchaMessage.ID, c.ChatMember().Chat.ID)
-	gUserCaptchaPendingTable.Set(captchaDataKey, captchaDataVal)
-	time.AfterFunc(time.Duration(config.SystemC.JoinHintAfterDelTime)*time.Second, func() {
-		if err = Bot.Delete(captchaMessage); err != nil {
-			log.Sugar.Error("[UserJoinGroup] delete join hint message err:", err)
-		}
-	})
-	time.AfterFunc(time.Hour, func() {
-		gUserCaptchaPendingTable.Del(captchaDataKey)
-	})
+	err = service.CreateCaptchaRecord(record)
 	return err
 }
 
 // ManageBan 管理员手动禁止
 func ManageBan() func(c tb.Context) error {
 	return func(c tb.Context) error {
-		key := fmt.Sprintf("%d|%d", c.Callback().Message.ID, c.Chat().ID)
-		record := gUserCaptchaPendingTable.Get(key)
-		if record.UserId > 0 {
-			gUserCaptchaPendingTable.Del(key)
-		}
-		return c.Delete()
+		defer func() {
+			c.Delete()
+		}()
+		captchaId := c.Data()
+		return service.TimeoutRecordByCaptchaId(captchaId)
 	}
 }
 
 // ManagePass 管理员手动通过
 func ManagePass() func(c tb.Context) error {
 	return func(c tb.Context) error {
-		key := fmt.Sprintf("%d|%d", c.Callback().Message.ID, c.Chat().ID)
-		record := gUserCaptchaPendingTable.Get(key)
-		if record != nil && record.UserId > 0 {
-			// 解禁用户
-			err := Bot.Restrict(c.Chat(), &tb.ChatMember{
-				User:   &tb.User{ID: record.UserId},
-				Rights: tb.NoRestrictions(),
-			})
-			if err != nil {
-				log.Sugar.Error("[ManagePass] unban err:", err)
-			}
-			gUserCaptchaPendingTable.Del(key)
-		}
-		return c.Delete()
+		defer func() {
+			c.Delete()
+		}()
+		captchaId := c.Data()
+		return service.SuccessRecordByCaptchaId(captchaId)
 	}
 }
 
 // refreshCaptcha 刷新验证码
 func refreshCaptcha() func(c tb.Context) error {
 	return func(c tb.Context) error {
-		userIdStr := strconv.FormatInt(c.Sender().ID, 10)
-		captchaCode := gUserCaptchaCodeTable.Get(userIdStr)
-		if captchaCode == nil || captchaCode.UserId != c.Sender().ID {
-			return nil
+		captchaId := c.Data()
+		captchaRecord, err := service.GetRecordByCaptchaId(captchaId)
+		if err != nil {
+			log.Sugar.Error("[refreshCaptcha] GetRecordByCaptchaId err:", err)
+			return c.Respond(&tb.CallbackResponse{
+				Text: "服务器繁忙~",
+			})
+		}
+		if captchaRecord.ID <= 0 || captchaRecord.TelegramUserId != c.Sender().ID || captchaRecord.CaptchaStatus != model.CaptchaStatusPending {
+			return c.Respond(&tb.CallbackResponse{
+				Text: "您在该群没有待验证记录，或已超时，请重新加入后验证",
+			})
 		}
 		// 获得一个新验证码
 		code, imgUrl, err := captcha.GetCaptcha()
@@ -341,7 +316,7 @@ func refreshCaptcha() func(c tb.Context) error {
 		editMessage := &tb.Photo{
 			File: tb.FromDisk(imgUrl),
 			Caption: fmt.Sprintf(config.MessageC.CaptchaImage,
-				captchaCode.GroupTitle,
+				captchaRecord.TelegramChatName,
 				config.SystemC.CaptchaTimeout,
 			),
 		}
@@ -350,9 +325,14 @@ func refreshCaptcha() func(c tb.Context) error {
 			log.Sugar.Error("[refreshCaptcha] send refreshCaptcha err:", err)
 			return nil
 		}
-		captchaCode.Code = code
-		gUserCaptchaCodeTable.Set(userIdStr, captchaCode)
 		_ = os.Remove(imgUrl)
+		err = service.SetCaptchaCodeByCaptchaId(captchaId, code)
+		if err != nil {
+			log.Sugar.Error(err)
+			return c.Respond(&tb.CallbackResponse{
+				Text: "服务器繁忙~",
+			})
+		}
 		return c.Respond(&tb.CallbackResponse{
 			Text: "验证码已刷新~",
 		})
