@@ -204,15 +204,20 @@ func VerificationProcess(c tb.Context) error {
 // UserJoinGroup 用户加群事件
 func UserJoinGroup(c tb.Context) error {
 	var err error
-	// 如果是管理员邀请的，直接通过
-	if isManage(c.Message().Chat, c.Sender().ID) {
+
+	if c.ChatMember().NewChatMember.Role != tb.Member {
 		return nil
 	}
-
+	// 如果是管理员邀请的，直接通过
+	if isManage(c.ChatMember().Chat, c.ChatMember().Sender.ID) {
+		return nil
+	}
+	newUser := c.ChatMember().NewChatMember.User
+	chat := c.ChatMember().Chat
 	// ban user
-	err = Bot.Restrict(c.Message().Chat, &tb.ChatMember{
+	err = Bot.Restrict(chat, &tb.ChatMember{
 		Rights:          tb.NoRights(),
-		User:            c.Message().UserJoined,
+		User:            newUser,
 		RestrictedUntil: tb.Forever(),
 	})
 	if err != nil {
@@ -220,11 +225,11 @@ func UserJoinGroup(c tb.Context) error {
 		return err
 	}
 
-	userLink := fmt.Sprintf("tg://user?id=%d", c.Message().UserJoined.ID)
+	userLink := fmt.Sprintf("tg://user?id=%d", newUser.ID)
 	joinMessage := fmt.Sprintf(config.MessageC.JoinHint,
-		c.Message().UserJoined.LastName+c.Message().UserJoined.FirstName,
+		newUser.LastName+newUser.FirstName,
 		userLink,
-		c.Message().Chat.Title,
+		chat.Title,
 		config.SystemC.JoinHintAfterDelTime)
 	captchaId := uuid.NewV4().String()
 	doCaptchaBtn := joinMessageMenu.URL("👉🏻点我开始人机验证🤖", fmt.Sprintf("https://t.me/%s?start=%s", Bot.Me.Username, captchaId))
@@ -240,7 +245,7 @@ func UserJoinGroup(c tb.Context) error {
 		joinMessageMenu.Row(manageBanBtn, managePassBtn),
 	)
 	LoadAdMenuBtn(joinMessageMenu)
-	captchaMessage, err := Bot.Send(c.Message().Chat, joinMessage, joinMessageMenu, tb.ModeMarkdownV2)
+	captchaMessage, err := Bot.Send(chat, joinMessage, joinMessageMenu, tb.ModeMarkdownV2)
 	if err != nil {
 		log.Sugar.Error("[UserJoinGroup] send join hint message err:", err)
 		return err
@@ -255,11 +260,11 @@ func UserJoinGroup(c tb.Context) error {
 
 	record := &model.UserCaptchaRecord{
 		CaptchaId:             captchaId,
-		TelegramChatName:      c.Message().Chat.Title,
-		TelegramUserLastName:  c.Message().UserJoined.LastName,
-		TelegramUserFirstName: c.Message().UserJoined.FirstName,
-		TelegramUserId:        c.Message().UserJoined.ID,
-		TelegramChatId:        c.Message().Chat.ID,
+		TelegramChatName:      chat.Title,
+		TelegramUserLastName:  newUser.LastName,
+		TelegramUserFirstName: newUser.FirstName,
+		TelegramUserId:        newUser.ID,
+		TelegramChatId:        chat.ID,
 		CaptchaMessageId:      captchaMessage.ID,
 		CaptchaStatus:         model.CaptchaStatusPending,
 		CaptchaTimeoutEndTime: carbon.DateTime{Carbon: carbon.Now().AddSeconds(config.SystemC.CaptchaTimeout)},
@@ -286,6 +291,32 @@ func ManagePass() func(c tb.Context) error {
 			c.Delete()
 		}()
 		captchaId := c.Data()
+		captchaRecord, err := service.GetRecordByCaptchaId(captchaId)
+		if err != nil {
+			log.Sugar.Error("[ManagePass] GetRecordByCaptchaId err:", err)
+			return c.Respond(&tb.CallbackResponse{
+				Text:      "手动通过失败，服务器异常~，请稍后再试",
+				ShowAlert: true,
+			})
+		}
+		if captchaRecord.ID <= 0 || captchaRecord.CaptchaStatus != model.CaptchaStatusPending {
+			return c.Respond(&tb.CallbackResponse{
+				Text:      "该人员已无待验证记录",
+				ShowAlert: true,
+			})
+		}
+		// 解禁用户
+		err = Bot.Restrict(&tb.Chat{ID: captchaRecord.TelegramChatId}, &tb.ChatMember{
+			User:   &tb.User{ID: captchaRecord.TelegramUserId},
+			Rights: tb.NoRestrictions(),
+		})
+		if err != nil {
+			log.Sugar.Error("[ManagePass] unban err:", err)
+			return c.Respond(&tb.CallbackResponse{
+				Text:      "手动通过失败，服务器异常~，请稍后再试",
+				ShowAlert: true,
+			})
+		}
 		return service.SuccessRecordByCaptchaId(captchaId)
 	}
 }

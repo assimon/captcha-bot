@@ -15,7 +15,12 @@ func BotStart() {
 	setting := tb.Settings{
 		Token:   config.TelegramC.BotToken,
 		Updates: 100,
-		Poller:  &tb.LongPoller{Timeout: 10 * time.Second},
+		Poller: &tb.LongPoller{Timeout: 10 * time.Second, AllowedUpdates: []string{
+			"message",
+			"chat_member",
+			"inline_query",
+			"callback_query",
+		}},
 		OnError: func(err error, context tb.Context) {
 			ulog.Sugar.Error(err)
 		},
@@ -40,7 +45,7 @@ func RegisterHandle() {
 		return c.Send("pong")
 	})
 	Bot.Handle(START_CMD, StartCaptcha)
-	Bot.Handle(tb.OnUserJoined, UserJoinGroup)
+	Bot.Handle(tb.OnChatMember, UserJoinGroup)
 	Bot.Handle(tb.OnText, OnTextMessage)
 	// 广告
 	Bot.Handle(ADD_AD, AddAd, isRootMiddleware)
