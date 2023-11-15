@@ -55,7 +55,7 @@ func InitConfig() {
 		log.Fatal(err)
 	}
 	AppPath = path
-	viper.SetConfigFile(path + "/config.toml")
+	viper.SetConfigFile(path + "/config/config.toml")
 	err = viper.ReadInConfig()
 	if err != nil {
 		log.Fatal("load config file err:", err)
