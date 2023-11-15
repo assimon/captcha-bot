@@ -3,8 +3,8 @@ package sensitiveword
 import (
 	"github.com/assimon/captcha-bot/util/config"
 	"github.com/importcjj/sensitive"
-	"io/ioutil"
 	"log"
+	"os"
 	"strings"
 )
 
@@ -14,7 +14,7 @@ var Filter *sensitive.Filter
 func InitSensitiveWord() {
 	sensitiveWordPath := config.AppPath + "/dict/"
 	Filter = sensitive.New()
-	files, err := ioutil.ReadDir(sensitiveWordPath)
+	files, err := os.ReadDir(sensitiveWordPath)
 	if err != nil {
 		log.Fatalln("[InitSensitiveWord] load dict err:", err)
 	}

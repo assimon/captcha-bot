@@ -3,6 +3,7 @@ package bootstrap
 import (
 	"github.com/assimon/captcha-bot/telegram"
 	"github.com/assimon/captcha-bot/util/config"
+	E "github.com/assimon/captcha-bot/util/error"
 	"github.com/assimon/captcha-bot/util/log"
 	"github.com/assimon/captcha-bot/util/orm"
 	"github.com/assimon/captcha-bot/util/sensitiveword"
@@ -18,14 +19,9 @@ func Start() {
 	orm.InitDb()
 	sensitiveword.InitSensitiveWord()
 	// 机器人启动
-	go func() {
-		defer func() {
-			if err := recover(); err != nil {
-				log.Sugar.Error("server bot err:", err)
-			}
-		}()
+	go E.MustPanicErrorFunc(func() {
 		telegram.BotStart()
-	}()
+	})
 	signalChan := make(chan os.Signal, 1)
 	signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM)
 	<-signalChan

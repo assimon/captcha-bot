@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  captcha-bot:
+    build:
+      context: ./
+      dockerfile: Dockerfile
+    image: captcha-bot
+    container_name: captcha-bot
+    volumes:
+      - ./db:/work/db
+      - ./config:/work/config
+      - ./dict:/work/dict
+      - ./runtime:/work/runtime
+    restart: unless-stopped

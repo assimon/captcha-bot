@@ -15,7 +15,12 @@ func BotStart() {
 	setting := tb.Settings{
 		Token:   config.TelegramC.BotToken,
 		Updates: 100,
-		Poller:  &tb.LongPoller{Timeout: 10 * time.Second},
+		Poller: &tb.LongPoller{Timeout: 10 * time.Second, AllowedUpdates: []string{
+			"message",
+			"chat_member",
+			"inline_query",
+			"callback_query",
+		}},
 		OnError: func(err error, context tb.Context) {
 			ulog.Sugar.Error(err)
 		},
@@ -24,13 +29,14 @@ func BotStart() {
 	if config.TelegramC.ApiProxy != "" {
 		setting.URL = config.TelegramC.ApiProxy
 	}
-	b, err := tb.NewBot(setting)
+	var err error
+	Bot, err = tb.NewBot(setting)
 	if err != nil {
 		log.Fatal(err)
 	}
-	Bot = b
 	RegisterHandle()
-	b.Start()
+	go RunSyncTask()
+	Bot.Start()
 }
 
 // RegisterHandle 注册处理器
@@ -41,9 +47,6 @@ func RegisterHandle() {
 	Bot.Handle(START_CMD, StartCaptcha)
 	Bot.Handle(tb.OnChatMember, UserJoinGroup)
 	Bot.Handle(tb.OnText, OnTextMessage)
-	// 按钮点击事件
-	Bot.Handle(&manageBanBtn, ManageBan(), isManageMiddleware)
-	Bot.Handle(&managePassBtn, ManagePass(), isManageMiddleware)
 	// 广告
 	Bot.Handle(ADD_AD, AddAd, isRootMiddleware)
 	Bot.Handle(ALL_AD, AllAd, isRootMiddleware)
