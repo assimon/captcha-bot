@@ -43,14 +43,15 @@ func BotStart() {
 func RegisterHandle() {
 	Bot.Handle(PING_CMD, func(c tb.Context) error {
 		return c.Send("pong")
-	})
-	Bot.Handle(START_CMD, StartCaptcha)
+	}, adCommandDefenseMiddleware)
+	Bot.Handle(START_CMD, StartCaptcha, adCommandDefenseMiddleware)
 	Bot.Handle(tb.OnChatMember, UserJoinGroup)
 	Bot.Handle(tb.OnText, OnTextMessage)
+
 	// 广告
-	Bot.Handle(ADD_AD, AddAd, isRootMiddleware)
-	Bot.Handle(ALL_AD, AllAd, isRootMiddleware)
-	Bot.Handle(DEL_AD, DelAd, isRootMiddleware)
+	Bot.Handle(ADD_AD, AddAd, isRootMiddleware, adCommandDefenseMiddleware)
+	Bot.Handle(ALL_AD, AllAd, isRootMiddleware, adCommandDefenseMiddleware)
+	Bot.Handle(DEL_AD, DelAd, isRootMiddleware, adCommandDefenseMiddleware)
 }
 
 // isManageMiddleware 管理员中间件
@@ -71,6 +72,17 @@ func isRootMiddleware(next tb.HandlerFunc) tb.HandlerFunc {
 	return func(c tb.Context) error {
 		if !c.Message().Private() || !isRoot(c.Sender().ID) {
 			return nil
+		}
+		return next(c)
+	}
+}
+
+// adCommandDefenseMiddleware 广告命令防御，防止使用"/ping 广告语"
+func adCommandDefenseMiddleware(next tb.HandlerFunc) tb.HandlerFunc {
+	return func(c tb.Context) error {
+		err := AdBlock(c)
+		if err != nil {
+			return err
 		}
 		return next(c)
 	}
